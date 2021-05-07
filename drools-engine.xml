@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<engine-configuration
+        xmlns="http://xmlns.opennms.org/xsd/drools-engine"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://xmlns.opennms.org/xsd/drools-engine /opt/opennms/share/xsds/drools-engine.xsd ">
+  <rule-set name="eventCountRules-testtest3">
+    <rule-file>drools-engine.d/eventCount.drl</rule-file>
+    <event>uei.opennms.org/test/testtest3</event>
+    <global name="EVENT_INTERVAL" type="java.lang.Long" value="30000" />
+    <global name="EVENT_COUNT" type="java.lang.Integer" value="10" />
+    <global name="UEI" type="java.lang.String" value="uei.opennms.org/test/testtest3" />
+    <app-context>drools-engine.d/eventCount-context.xml</app-context>
+    <global name="LOG" ref="slf4jLogger"/>
+  </rule-set>
+  <rule-set name="eventCountRules-testtest2">
+    <rule-file>drools-engine.d/eventCount.drl</rule-file>
+    <event>uei.opennms.org/test/testtest2</event>
+    <global name="EVENT_INTERVAL" type="java.lang.Long" value="30000" />
+    <global name="EVENT_COUNT" type="java.lang.Integer" value="10" />
+    <global name="UEI" type="java.lang.String" value="uei.opennms.org/test/testtest2" />
+    <app-context>drools-engine.d/eventCount-context.xml</app-context>
+    <global name="LOG" ref="slf4jLogger"/>
+  </rule-set>
+  <rule-set name="eventCountRules-testtest1">
+    <rule-file>drools-engine.d/eventCount.drl</rule-file>
+    <event>uei.opennms.org/test/testtest1</event>
+    <global name="EVENT_INTERVAL" type="java.lang.Long" value="30000" />
+    <global name="EVENT_COUNT" type="java.lang.Integer" value="10" />
+    <global name="UEI" type="java.lang.String" value="uei.opennms.org/test/testtest1" />
+    <app-context>drools-engine.d/eventCount-context.xml</app-context>
+    <global name="LOG" ref="slf4jLogger"/>
+  </rule-set>
+</engine-configuration>

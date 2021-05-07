@@ -1,0 +1,19 @@
+= A Drools event accumulator using the Event Correlator
+
+== Purpose
+A set of Drools rules that leverage the existing flap-detection helpers in order
+to maintain a count of events received within a configurable interval and emit
+an event when the count is exceeded.
+
+== Installing
+ - Enable the `Correlator` in `$OPENNMS_HOME/etc/services-configuration.xml`
+ - copy `drools-engine.xml` to `$OPENNMS_HOME/etc/`
+ - copy the entire `drools-engine.d` to `$OPENNMS_HOME/etc/`
+ - modify the `drools-engine.xml` for your desired interval, event count, and event UEIs.
+ - cross your fingers and restart OpenNMS
+
+== Usage
+As described.  The log output from drools is eaten by systemd; you can view it with `journalctl -u opennms`
+
+== Questions?
+Ping @dino2gnt in https://chat.opennms.com/opennms/[the OpenNMS Mattermost chat]
