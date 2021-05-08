@@ -3,9 +3,10 @@ package org.opennms.netmgt.correlation.drools;
 
 import java.util.Date;
 
-import org.opennms.core.utils.InetAddressUtils;
+//import org.opennms.core.utils.InetAddressUtils;
 import org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine;
 import org.opennms.netmgt.xml.event.Event;
+import org.opennms.netmgt.xml.event.Parm;
 import org.opennms.netmgt.model.events.EventBuilder;
 import org.opennms.netmgt.model.events.EventUtils;
 import org.drools.core.spi.KnowledgeHelper;
@@ -24,8 +25,8 @@ rule "Event received, create a flap timer if we dont have one"
                 $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
                 not $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 );
 	then
-                println( "Got an event: " + $uei );
 		retract( $e );
+                println( "Got an event: " + $uei );
 		insert ( createFlap(engine, $nodeid, $ipAddr, $svcName, -1, EVENT_INTERVAL )); 
 end
 
@@ -38,23 +39,21 @@ rule "Start a new flap count if we don't have one"
 
         then
                 insert( new FlapCount( $nodeid, $ipAddr, $svcName, -1 ) );
-                $flap.setCounted( true );
                 update( $flap );
                 retract( $e );
 end
 
 rule "start counting events"
         salience 100
+        lock-on-active true
         when
                 $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
                 $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 );
-                $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 );
+                $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1, $count : count );
         then
-                println($uei + " count + 1");
-                retract( $e );
                 $eventCount.increment();
+                println($uei + " count(" + $count + ")");
                 update( $eventCount );
-                $flap.setCounted( true );
                 update( $flap );
 
 end
@@ -80,31 +79,34 @@ rule "retract timer-expired counters"
 		$expiration: TimerExpired( id == $timerId )
 		$eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName,  locationMonitor == -1 )
 	then
+		println( "Counter for " +$nodeid + ":" + $ipAddr + " has expired after " + EVENT_INTERVAL + "ms. ");
 		retract( $flap );
 		retract( $eventCount );
 		retract( $expiration );
-		println( "Counter for " + UEI + " has expired after " + EVENT_INTERVAL + "ms. ");
 end
 
 rule "flap count exceeded, send rollup event"
 	when
 		$eventCount : FlapCount( $nodeid : nodeid, $ipAddr : ipAddr, $svcName : svcName, locationMonitor == -1, alerted == false, count >= ( EVENT_COUNT ) )
+                $e : Event()
 	then
-		sendRollupEvent( engine, $nodeid, $ipAddr, $svcName, UEI, EVENT_COUNT, EVENT_INTERVAL );
+		sendRollupEvent( engine, $e, EVENT_COUNT, EVENT_INTERVAL );
+		println("Event count(" + EVENT_COUNT  + ") exceeded for " + $e.getUei() + ", sending rollup event");
+                retract( $e );
 		$eventCount.setAlerted( true );
 		update( $eventCount );
-		println("Event count(" + EVENT_COUNT  + ") exceeded for " + UEI + ", sending rollup event");
 end
 
 //
 // Builds the rollup event to emit when the count is exceeded
 //
-function void sendRollupEvent(DroolsCorrelationEngine engine, Long nodeId, String ipAddr, String svcName, String uei, Integer count, Long interval) {
-	EventBuilder bldr = new EventBuilder(uei + "Rollup", "Drools")
-		.setNodeid(nodeId.intValue())
-		.setInterface(InetAddressUtils.addr(ipAddr))
-		.setService(svcName)
-                .addParam("rolledUpUEI", uei)
+function void sendRollupEvent(DroolsCorrelationEngine engine, Event e, Integer count, Long interval) {
+	EventBuilder bldr = new EventBuilder(e.getUei() + "Rollup", "DroolsEventAccumulator")
+		.setNodeid(e.getNodeid())
+		.setInterface(e.getInterfaceAddress())
+		.setService(e.getService());
+                copyParms(e, bldr);
+                bldr.addParam("rolledUpUEI", e.getUei())
                 .addParam("eventCount", count)
                 .addParam("interval", interval);
 	engine.sendEvent(bldr.getEvent());
@@ -118,6 +120,14 @@ function Flap createFlap(DroolsCorrelationEngine engine, Long nodeid, String ipA
     return new Flap( nodeid, ipAddr, svcName, locationMonitor, engine.setTimer( eventInterval ) );
 }
 
+//
+// Copy parms from the last event into the Rollup event
+//
+function void copyParms(Event sourceEvent, EventBuilder targetEventBuilder) {
+    for (Parm p : sourceEvent.getParmCollection()) {
+        targetEventBuilder.addParam(p);
+    }
+}
 //
 // Just for convenience
 //
