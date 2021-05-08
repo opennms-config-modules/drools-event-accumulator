@@ -3,7 +3,9 @@
 == Purpose
 A set of Drools rules that leverage the existing flap-detection helpers in order
 to maintain a count of events received within a configurable interval and emit
-an event when the count is exceeded.
+an event when the count is exceeded. I am not an expert at Drools, this was primarily
+done as a learning exercise and may not follow the rules of best practice or
+sanity.
 
 == Installing
  - Enable the `Correlator` in `$OPENNMS_HOME/etc/services-configuration.xml`
