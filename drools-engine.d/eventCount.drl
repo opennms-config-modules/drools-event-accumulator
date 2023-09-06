@@ -33,12 +33,11 @@ rule "Start a new flap count if we don't have one"
         not FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 )
     then
         insert( new FlapCount( $nodeid, $ipAddr, $svcName, -1 ) );
-        delete( $e ); // shortcut here - we'll have a FlapCount of 1 already so we don't need to increment
 end
 
 rule "start counting events"
-    salience 100
-    no-loop true
+    // Counter starts set to 1, so we want to increment after we've checked the count
+    salience -100
     when
         $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
         $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 )
@@ -48,8 +47,8 @@ rule "start counting events"
             // FlapCount starts with a count of 1, so we only need to increment after the first one
             increment();
         }
-        LOG.info( $uei + " count(" + ($count+1) + ")");
-        update( $eventCount );
+        LOG.info( $uei + " count(" + $count + ")");
+        delete( $e ); // don't keep processing since we've pre-incremented the count
 end
 
 rule "retract timer-expired counters"
@@ -74,15 +73,6 @@ rule "flap count exceeded, send rollup event"
         modify( $eventCount ) {
             setAlerted( true );
         }
-end
-
-rule "delete the event after processing"
-    salience -100
-    when
-        $e : Event( $uei : uei )
-    then
-        delete( $e ); // we want to just drop this so we don't keep processing it
-        LOG.info ( "Deleting " + $uei + " so we don't process it more than once." );
 end
 
 //
