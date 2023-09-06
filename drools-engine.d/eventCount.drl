@@ -71,20 +71,18 @@ rule "flap count exceeded, send rollup event"
     then
         sendRollupEvent( engine, $e, EVENT_COUNT, EVENT_INTERVAL );
         LOG.info("Event count(" + EVENT_COUNT  + ") exceeded for " + $e.getUei() + ", sending rollup event");
-        delete( $e );
         modify( $eventCount ) {
             setAlerted( true );
         }
 end
 
-rule "rollup event already sent, delete event"
+rule "delete the event after processing"
     salience -100
     when
-        $eventCount : FlapCount( $nodeid : nodeid, $ipAddr : ipAddr, $svcName : svcName, locationMonitor == -1, alerted == true )
         $e : Event( $uei : uei )
     then
         delete( $e ); // we want to just drop this so we don't keep processing it
-        LOG.info ( "Got " + $uei + " but we already sent rollup event, discarding." );
+        LOG.info ( "Deleting " + $uei + " so we don't process it more than once." );
 end
 
 //
