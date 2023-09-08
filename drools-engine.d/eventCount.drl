@@ -21,8 +21,8 @@ rule "Event received, create a flap timer if we dont have one"
         $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
         not $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 )
     then
-        LOG.info( "Got an event: " + $uei );
-        insert ( createFlap(engine, $nodeid, $ipAddr, $svcName, -1, EVENT_INTERVAL )); 
+        LOG.info( "Got an event: " + $uei + " for " + $nodeid + " " + $ipAddr );
+        insert ( createFlap(engine, $nodeid, $ipAddr, $svcName, -1, EVENT_INTERVAL ));
 end
 
 rule "Start a new flap count if we don't have one"
@@ -48,7 +48,7 @@ rule "start counting events"
             // FlapCount starts with a count of 1, so we only need to increment after the first one
             increment();
         }
-        LOG.info( $uei + " count(" + $count + ")");
+        LOG.info( $uei + " count(" + $count + ") for " + $nodeid + " " + $ipAddr);
         delete( $e ); // don't keep processing since we've pre-incremented the count
 end
 
@@ -67,10 +67,10 @@ end
 rule "flap count exceeded, send rollup event"
     when
         $eventCount : FlapCount( $nodeid : nodeid, $ipAddr : ipAddr, $svcName : svcName, locationMonitor == -1, alerted == false, count >= ( EVENT_COUNT ) )
-        $e : Event()
+        $e : Event ( nodeid == $nodeid, interface == $ipAddr, service == $svcName )
     then
         sendRollupEvent( engine, $e, EVENT_COUNT, EVENT_INTERVAL );
-        LOG.info("Event count(" + EVENT_COUNT  + ") exceeded for " + $e.getUei() + ", sending rollup event");
+        LOG.info("Event count(" + EVENT_COUNT  + ") exceeded for " + $e.getUei() + " " + $nodeid + " " + $ipAddr + ", sending rollup event");
         modify( $eventCount ) {
             setAlerted( true );
         }
