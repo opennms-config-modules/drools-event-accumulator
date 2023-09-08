@@ -38,6 +38,7 @@ end
 rule "start counting events"
     // Counter starts set to 1, so we want to increment after we've checked the count
     salience -100
+    lock-on-active // really, don't run rules after we increment
     when
         $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
         $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 )
