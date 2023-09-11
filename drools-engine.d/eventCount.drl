@@ -15,43 +15,42 @@ global java.lang.Integer EVENT_COUNT;
 global java.lang.Long EVENT_INTERVAL;
 global java.lang.String UEI;
 
+//
+// When we get a new event, create a 'Flap' object with a timer
+// since interface traps (or oper status poll) could refer to an interface without an IP
+// or come with event 'interface' of the loopback, we abuse the ipAddr field and add
+// parm values to it to keep the timer unique per interface
+//
 rule "Event received, create a flap timer if we dont have one"
     salience 100
     when
-        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
-        not $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 )
+        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service, $ifname : getParm("ifName"), $snmpifname : getParm("snmpifname") )
+        not $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1 )
     then
-        LOG.info( "Got an event: " + $uei + " for " + $nodeid + " " + $ipAddr );
-        insert ( createFlap(engine, $nodeid, $ipAddr, $svcName, -1, EVENT_INTERVAL ));
+        LOG.info( $uei + " " + $ipAddr+"_"+$snmpifname+"_"+$ifname );
+        insert ( createFlap(engine, $nodeid, $ipAddr+"_"+$snmpifname+"_"+$ifname, $svcName, -1, EVENT_INTERVAL ));
 end
 
+//
+// After we've created a 'Flap' object with a timer, we also need to create a 'FlapCount'
+// object to hold the number of times we've seen the event while the timer was active.
+// As before, we use parm values to help with traps/oper status polling uniqueness
+// A new counter starts with a value of 1, so we increment after we do other processing.
+//
 rule "Start a new flap count if we don't have one"
     salience 100
     when
-        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
-        $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 )
-        not FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 )
+        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service, $ifname : getParm("ifName"), $snmpifname : getParm("snmpifname") )
+        $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1 )
+        not FlapCount( nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1 )
     then
-        insert( new FlapCount( $nodeid, $ipAddr, $svcName, -1 ) );
+        insert( new FlapCount( $nodeid, $ipAddr+"_"+$snmpifname+"_"+$ifname, $svcName, -1 ) );
 end
 
-rule "start counting events"
-    // Counter starts set to 1, so we want to increment after we've checked the count
-    salience -100
-    lock-on-active true // really, don't run rules after we increment
-    when
-        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
-        $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 )
-        $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1, $count : count )
-    then
-        modify( $eventCount ) {
-            // FlapCount starts with a count of 1, so we only need to increment after the first one
-            increment();
-        }
-        LOG.info( $uei + " count(" + $count + ") for " + $nodeid + " " + $ipAddr);
-        delete( $e ); // don't keep processing since we've pre-incremented the count
-end
-
+//
+// When a timer expires, we remove the Flap and FlapCount objects. Since we're setting $ipAddr
+// from the Flap object, we don't need to do anything special to get the string with parm values
+//
 rule "retract timer-expired counters"
     when
         $flap : Flap( $nodeid : nodeid, $ipAddr : ipAddr, $svcName : svcName, locationMonitor == -1, $timerId : timerId )
@@ -61,19 +60,44 @@ rule "retract timer-expired counters"
         LOG.info( "Counter for " +$nodeid + ":" + $ipAddr + " has expired after " + EVENT_INTERVAL + "ms. ");
         delete( $flap );
         delete( $eventCount );
-        delete( $expiration );
 end
 
+//
+// Check the eventCount and see if we've crossed the threshold. We extract parm values from
+// the event as with the other rules to find a unique eventCount for an uei+interface
+//
 rule "flap count exceeded, send rollup event"
     when
-        $eventCount : FlapCount( $nodeid : nodeid, $ipAddr : ipAddr, $svcName : svcName, locationMonitor == -1, alerted == false, count >= ( EVENT_COUNT ) )
-        $e : Event ( nodeid == $nodeid, interface == $ipAddr, service == $svcName )
+        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service, $ifname : getParm("ifName"), $snmpifname : getParm("snmpifname") )
+        $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1, alerted == false, count >= ( EVENT_COUNT ) )
     then
         sendRollupEvent( engine, $e, EVENT_COUNT, EVENT_INTERVAL );
-        LOG.info("Event count(" + EVENT_COUNT  + ") exceeded for " + $e.getUei() + " " + $nodeid + " " + $ipAddr + ", sending rollup event");
+        LOG.info("Event count(" + EVENT_COUNT  + ") exceeded for " + $uei + " " + $ipAddr+"_"+$snmpifname+"_"+$ifname + ", sending rollup event");
         modify( $eventCount ) {
             setAlerted( true );
         }
+end
+
+//
+// After other processing, we grab an event and associated FlapCount, increment it and
+// then delete the event so it's not processed any more.
+//
+// lock-on-active shouldn't be necessary, but set it to be sure that we don't reactivate
+// any rules based on incrementing the counter here (they should activate the next time
+// an event comes in)
+//
+rule "increment event counter"
+    salience -100
+    lock-on-active true
+    when
+        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service, $ifname : getParm("ifName"), $snmpifname : getParm("snmpifname") )
+        $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1, $count : count )
+    then
+        modify( $eventCount ) {
+            increment();
+        }
+        LOG.info( $uei + " " + $ipAddr+"_"+$snmpifname+"_"+$ifname + " count(" + $count + "++)" );
+        delete( $e );
 end
 
 //
