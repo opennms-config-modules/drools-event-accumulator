@@ -76,6 +76,10 @@ rule "flap count exceeded, send rollup event"
         modify( $eventCount ) {
             setAlerted( true );
         }
+        // if EVENT_COUNT is 1 and EVENT_INTERVAL is long, we need to delete the event here, because otherwise the FlapCount will expire before we
+        // increment and delete the event. This will cause us to send the Rollup over and over
+        // We don't care if the $count is inaccurate during the rest of EVENT_INTERVAL because we've already sent the Rollup
+        delete( $e );
 end
 
 //
