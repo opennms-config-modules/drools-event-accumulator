@@ -12,13 +12,14 @@ sanity.
  - copy `drools-engine.xml` to `$OPENNMS_HOME/etc/`
  - copy the entire `drools-engine.d` to `$OPENNMS_HOME/etc/`
  - modify the `drools-engine.xml` for your desired interval, event count, and event UEIs.
+ - add event defintions for the /Rollup events (i.e. uei.opennms.org/test/testtest1/Rollup)
  - cross your fingers and restart OpenNMS
 
 == Usage
-As described.  The log output from drools is eaten by systemd; you can view it 
-with `journalctl -u opennms`. The event parms from the triggering event are copied
-into the rollup event, so it would probably be helpful if all the event UEIs use
-the same parms and values, but we don't actually check for this.
+As described.  The log output from drools is written to logs/DroolsCorrelationEngine-*.log
+The event parms from the triggering event are copied into the rollup event, so it
+would probably be helpful if all the event UEIs use the same parms and values,
+but we don't actually check for this.
 
 == Questions?
 Ping @dino2gnt in https://chat.opennms.com/opennms/[the OpenNMS Mattermost chat]
