@@ -1,7 +1,5 @@
 = A Drools event accumulator using the Event Correlator
 
-IMPORTANT: These scripts do not work with the upgraded Drools engine included in 32.0.5 and 2023.1.9.
-
 == Purpose
 A set of Drools rules that leverage the existing flap-detection helpers in order
 to maintain a count of events received within a configurable interval and emit
