@@ -8,9 +8,9 @@ import org.opennms.netmgt.xml.event.Parm;
 import org.opennms.netmgt.model.events.EventBuilder;
 import org.opennms.netmgt.model.events.EventUtils;
 
-// If you are using version 32.0.4 or prior, or version 2023.1.8 or prior, uncomment the following line.^M
-// The KnowledgeHelper import is not required on 32.0.5+ or 2023.1.9+ due to an updated Drools v8 engine.^M
-// import org.drools.core.spi.KnowledgeHelper;^M
+// If you are using version 32.0.4 or prior, or version 2023.1.8 or prior, uncomment the following line.
+// The KnowledgeHelper import is not required on 32.0.5+ or 2023.1.9+ due to an updated Drools v8 engine.
+// import org.drools.core.spi.KnowledgeHelper;
 
 global org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine engine;
 global org.slf4j.Logger LOG;
