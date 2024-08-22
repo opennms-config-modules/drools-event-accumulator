@@ -1,9 +1,7 @@
-
 package org.opennms.netmgt.correlation.drools;
 
 import java.util.Date;
 
-//import org.opennms.core.utils.InetAddressUtils;
 import org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine;
 import org.opennms.netmgt.xml.event.Event;
 import org.opennms.netmgt.xml.event.Parm;
@@ -14,7 +12,6 @@ import org.opennms.netmgt.model.events.EventUtils;
 // The KnowledgeHelper import is not required on 32.0.5+ or 2023.1.9+ due to an updated Drools v8 engine.
 // import org.drools.core.spi.KnowledgeHelper;
 
-
 global org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine engine;
 global org.slf4j.Logger LOG;
 
@@ -22,98 +19,106 @@ global java.lang.Integer EVENT_COUNT;
 global java.lang.Long EVENT_INTERVAL;
 global java.lang.String UEI;
 
+//
+// When we get a new event, create a 'Flap' object with a timer
+// since interface traps (or oper status poll) could refer to an interface without an IP
+// or come with event 'interface' of the loopback, we abuse the ipAddr field and add
+// parm values to it to keep the timer unique per interface
+//
 rule "Event received, create a flap timer if we dont have one"
-	salience 100
-	when
-                $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
-                not $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 );
-	then
-		retract( $e );
-                println( "Got an event: " + $uei );
-		insert ( createFlap(engine, $nodeid, $ipAddr, $svcName, -1, EVENT_INTERVAL )); 
+    when
+        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service, $ifname : getParm("ifName"), $snmpifname : getParm("snmpifname") )
+        not $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1 )
+    then
+        LOG.info( $uei + " " + $ipAddr+"_"+$snmpifname+"_"+$ifname );
+        insert ( createFlap(engine, $nodeid, $ipAddr+"_"+$snmpifname+"_"+$ifname, $svcName, -1, EVENT_INTERVAL) );
 end
 
+//
+// After we've created a 'Flap' object with a timer, we also need to create a 'FlapCount'
+// object to hold the number of times we've seen the event while the timer was active.
+// As before, we use parm values to help with traps/oper status polling uniqueness
+// A new counter starts with a value of 1, so we increment after we do other processing.
+//
 rule "Start a new flap count if we don't have one"
-        salience 100
-        when
-                $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
-		$flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 );
-		not FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 );
-
-        then
-                insert( new FlapCount( $nodeid, $ipAddr, $svcName, -1 ) );
-                update( $flap );
-                retract( $e );
+    when
+        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service, $ifname : getParm("ifName"), $snmpifname : getParm("snmpifname") )
+        $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1 )
+        not FlapCount( nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1 )
+    then
+        insert( new FlapCount( $nodeid, $ipAddr+"_"+$snmpifname+"_"+$ifname, $svcName, -1 ) );
 end
 
-rule "start counting events"
-        salience 100
-        lock-on-active true
-        when
-                $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service )
-                $flap : Flap(nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1 );
-                $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1, $count : count );
-        then
-                $eventCount.increment();
-                println($uei + " count(" + $count + ")");
-                update( $eventCount );
-                update( $flap );
-
-end
-
-//Not currently used
 //
-rule "resolving event received while timer active"
-	when
-		$e : Event( uei == "uei.opennms.org/correlation/testtestResolved", $nodeid : nodeid, $ipAddr : interface, $svcName : service )
-                $flap: Flap( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName, locationMonitor == -1, endTime == null )
-                $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName,  locationMonitor == -1 )
-	then
-		$flap.setEndTime( new Date() );
-		$eventCount.setCount(0);
-		update( $flap );
-		println(" Monitor has reported up for " + $e );
-		retract( $e );
-end
-
+// When a timer expires, we remove the Flap and FlapCount objects. Since we're setting $ipAddr
+// from the Flap object, we don't need to do anything special to get the string with parm values
+//
 rule "retract timer-expired counters"
-	when
-		$flap : Flap( $nodeid : nodeid, $ipAddr : ipAddr, $svcName : svcName, locationMonitor == -1, $timerId : timerId )
-		$expiration: TimerExpired( id == $timerId )
-		$eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName,  locationMonitor == -1 )
-	then
-		println( "Counter for " +$nodeid + ":" + $ipAddr + " has expired after " + EVENT_INTERVAL + "ms. ");
-		retract( $flap );
-		retract( $eventCount );
-		retract( $expiration );
-end
-
-rule "flap count exceeded, send rollup event"
-	when
-		$eventCount : FlapCount( $nodeid : nodeid, $ipAddr : ipAddr, $svcName : svcName, locationMonitor == -1, alerted == false, count >= ( EVENT_COUNT ) )
-                $e : Event()
-	then
-		sendRollupEvent( engine, $e, EVENT_COUNT, EVENT_INTERVAL );
-		println("Event count(" + EVENT_COUNT  + ") exceeded for " + $e.getUei() + ", sending rollup event");
-                retract( $e );
-		$eventCount.setAlerted( true );
-		update( $eventCount );
+    when
+        $flap : Flap( $nodeid : nodeid, $ipAddr : ipAddr, $svcName : svcName, locationMonitor == -1, $timerId : timerId )
+        $expiration : TimerExpired( id == $timerId )
+        $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr, svcName == $svcName,  locationMonitor == -1 )
+    then
+        LOG.info( "Counter for " +$nodeid + ":" + $ipAddr + " has expired after " + EVENT_INTERVAL + "ms. ");
+        delete( $flap );
+        delete( $eventCount );
 end
 
 //
-// Builds the rollup event to emit when the count is exceeded
+// Count the event (case when we haven't sent an alert)
+//
+rule "count the event"
+    when
+        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service, $ifname : getParm("ifName"), $snmpifname : getParm("snmpifname") )
+        $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1, count < ( EVENT_COUNT ), alerted == false, $count : count )
+    then
+        LOG.info( $uei + " " + $ipAddr+"_"+$snmpifname+"_"+$ifname + " count(" + $count + "++)" );
+        modify( $eventCount ) {
+            increment();
+        }
+        delete( $e );
+end
+
+//
+// Send an alert
+//
+rule "send an alert"
+    when
+        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service, $ifname : getParm("ifName"), $snmpifname : getParm("snmpifname") )
+        $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1, count >= ( EVENT_COUNT ), alerted == false )
+    then
+        sendRollupEvent( engine, $e, EVENT_COUNT, EVENT_INTERVAL );
+        modify( $eventCount ) {
+            setAlerted( true );
+        }
+        delete( $e );
+end
+
+//
+// Process the event after the alert
+//
+rule "delete the event if we have alerted"
+    when
+        $e : Event( $uei : uei, $nodeid : nodeid, $ipAddr : interface, $svcName : service, $ifname : getParm("ifName"), $snmpifname : getParm("snmpifname") )
+        $eventCount : FlapCount( nodeid == $nodeid, ipAddr == $ipAddr+"_"+$snmpifname+"_"+$ifname, svcName == $svcName, locationMonitor == -1, alerted == true )
+    then
+        LOG.info( $uei + " " + $ipAddr+"_"+$snmpifname+"_"+$ifname + " ... already alerted." );
+        delete( $e );
+end
+
+//
+// Builds and sends the rollup event
 //
 function void sendRollupEvent(DroolsCorrelationEngine engine, Event e, Integer count, Long interval) {
-	EventBuilder bldr = new EventBuilder(e.getUei() + "Rollup", "DroolsEventAccumulator")
-		.setNodeid(e.getNodeid())
-		.setInterface(e.getInterfaceAddress())
-		.setService(e.getService());
-                copyParms(e, bldr);
-                bldr.addParam("rolledUpUEI", e.getUei())
-                .addParam("eventCount", count)
-                .addParam("interval", interval);
-	engine.sendEvent(bldr.getEvent());
-
+    EventBuilder bldr = new EventBuilder(e.getUei() + "/Rollup", "DroolsEventAccumulator")
+        .setNodeid(e.getNodeid())
+        .setInterface(e.getInterfaceAddress())
+        .setService(e.getService());
+        copyParms(e, bldr);
+        bldr.addParam("rolledUpUEI", e.getUei())
+        .addParam("eventCount", count)
+        .addParam("interval", interval);
+    engine.sendEvent(bldr.getEvent());
 }
 
 //
@@ -131,10 +136,3 @@ function void copyParms(Event sourceEvent, EventBuilder targetEventBuilder) {
         targetEventBuilder.addParam(p);
     }
 }
-//
-// Just for convenience
-//
-function void println(Object msg) {
-	System.out.println(new Date()+" : "+msg);
-}
-
